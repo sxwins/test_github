@@ -3,7 +3,7 @@ import cv2
 import math 
 import time
 import numpy as np
-import mss
+import mss                          # Install command: pip install mss
 import sys
 import json
 import datetime
@@ -23,6 +23,8 @@ VIDEO_SOURCE = 2            # 1 for "Camera", 2 for "ScreenShot"
 SCREEN_SHOT_AREA = {"top": 350, "left": 100, "width": 1700, "height": 1150}
 
 SAMPLE_INTERVAL = 10        # time interval for counting people. unit: [s]
+
+MAX_IMG_WIDTH = 640         # maximum image width when performing analysis
 
 spreadsheet_id = "1nbYBbUSOHxSqe0z8aRwh3IUontt37BBU2o8eAGoon8Y"
 
@@ -58,43 +60,82 @@ def authenticate_service_account():
 
 def append_data_to_sheet(sheet, spreadsheet_id, data):
 
-    # # 現在の日付を取得し、'YYYY-MM-DD'形式にフォーマット
-    # current_date = datetime.datetime.now().strftime('%Y-%m-%d')
+    try:
+        # # 現在の日付を取得し、'YYYY-MM-DD'形式にフォーマット
+        # current_date = datetime.datetime.now().strftime('%Y-%m-%d')
 
-    date_time_str = data["time"]
-    current_date, current_time = date_time_str.split(maxsplit=1)
+        date_time_str = data["time"]
+        current_date, current_time = date_time_str.split(maxsplit=1)
 
-    # 現在のスプレッドシートに存在する全てのシート名を取得
-    existing_sheets = sheet.get(spreadsheetId=spreadsheet_id).execute().get('sheets', [])
-    sheet_names = [s['properties']['title'] for s in existing_sheets]
-    
-    # 現在の日付をシート名とするシートが存在するか確認
-    if current_date not in sheet_names:
-        # 存在しない場合、新しいシートを作成
-        requests = [{
-            'addSheet': {
-                'properties': {
-                    'title': current_date,  # シート名を現在の日付に設定
-                    'index': 0              # シートを一番前に挿入
+        # 現在のスプレッドシートに存在する全てのシート名を取得
+        existing_sheets = sheet.get(spreadsheetId=spreadsheet_id).execute().get('sheets', [])
+        sheet_names = [s['properties']['title'] for s in existing_sheets]
+        
+        # 現在の日付をシート名とするシートが存在するか確認
+        if current_date not in sheet_names:
+            # 存在しない場合、新しいシートを作成
+            requests = [{
+                'addSheet': {
+                    'properties': {
+                        'title': current_date,  # シート名を現在の日付に設定
+                        'index': 0              # シートを一番前に挿入
+                    }
                 }
+            }]
+            body = {
+                'requests': requests
             }
-        }]
-        body = {
-            'requests': requests
+            # バッチリクエストでシートを作成
+            response = sheet.batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
+            sheet_id = response['replies'][0]['addSheet']['properties']['sheetId']
+            print(f"シート '{current_date}' を作成しました。")
+
+        sheet_id = next(s['properties']['sheetId'] for s in existing_sheets if s['properties']['title'] == current_date)
+        
+        data_append = [data["index"], current_time, data["density"]]
+
+        # Append data to the last row
+        # insert_range = f"{current_date}!A:C"
+        # request = sheet.values().append(spreadsheetId=spreadsheet_id, range=insert_range, 
+        #                                 valueInputOption='RAW', 
+        #                                 body={'values': [data_append]})
+
+        # Insert data in the first row
+        batch_update_spreadsheet_request_body = {
+            "requests": [        
+                {
+                    "insertRange": {
+                        "range": {
+                            "sheetId": sheet_id,
+                            "startRowIndex": 0,
+                            "endRowIndex": 1
+                        },
+                        "shiftDimension": "ROWS"
+                    }
+                },
+                {
+                    "pasteData": {
+                        "data": f"{data_append[0]}, {data_append[1]}, {data_append[2]}",
+                        "type": "PASTE_NORMAL",
+                        "delimiter": ",",
+                        "coordinate": {
+                            "sheetId": sheet_id,
+                            "rowIndex": 0,
+                            "columnIndex": 0
+                        }
+                    }
+                }
+            ]
         }
-        # バッチリクエストでシートを作成
-        response = sheet.batchUpdate(spreadsheetId=spreadsheet_id, body=body).execute()
-        print(f"シート '{current_date}' を作成しました。")
+        request = service.spreadsheets().batchUpdate(spreadsheetId=spreadsheet_id, 
+                                                    body=batch_update_spreadsheet_request_body)
+        request.execute()
+        print(f"append_data_to_sheet: {data_append} を追加しました。")
 
-    # name_of_first_sheet = sheet.get(spreadsheetId=spreadsheet_id).execute().get('sheets')[0].get('properties').get('title')
+    except Exception as e:
+        # エラーが発生した場合にエラーメッセージを表示
+        print(f"Error at append_data_to_sheet: {str(e)}")
 
-    data_append = [data["index"], current_time, data["density"]]
-    insert_range = f"{current_date}!A:C"
-    request = sheet.values().append(spreadsheetId=spreadsheet_id, range=insert_range, 
-                                    valueInputOption='RAW', 
-                                    body={'values': [data_append]})
-    request.execute()
-    print(f"append_data_to_sheet: {data_append} を追加しました。")
  
 ##############################  Main  ###########################
 
@@ -163,6 +204,15 @@ while True:
         img = np.array(screenshot)          # 画像をnumpy配列に変換
         img = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)   # BGRフォーマットに変換（mssがキャプチャする画像はBGRAフォーマットなので）
 
+    # # 画像の幅がMAX_IMG_WIDTHより大きい場合、幅をMAX_IMG_WIDTHに縮小し、高さを等比で調整する
+    # if img.shape[1] > MAX_IMG_WIDTH:
+    #     aspect_ratio = img.shape[0] / img.shape[1]  # アスペクト比（高さ/幅）
+    #     new_width = MAX_IMG_WIDTH                             # 新しい幅
+    #     new_height = int(new_width * aspect_ratio)  # 新しい高さを等比で計算
+    #     print(img.shape)
+    #     img = cv2.resize(img, (new_width, new_height))  # 画像をリサイズ
+    #     print(img.shape)
+
     results = model(img, stream=True)
     frame_count += 1
 
@@ -204,7 +254,7 @@ while True:
     elapsed_time = current_time - start_time
 
     # Check if 60 seconds have passed
-    if elapsed_time >= 10:
+    if elapsed_time >= SAMPLE_INTERVAL:
         # Get current time
         time_str = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))
         if frame_count > 0:
@@ -225,7 +275,7 @@ while True:
         people_count = 0  
         frame_count  = 0  
 
-    cv2.putText(img, str_count_info, [50, 50], cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 255), 5)
+    cv2.putText(img, str_count_info, [50, 50], cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 255), 5)
     cv2.imshow(window_name, img)
     if cv2.waitKey(1) == ord('q'):
         break
