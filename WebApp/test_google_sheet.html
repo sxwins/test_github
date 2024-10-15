@@ -36,8 +36,7 @@
   </head>
   <body>
     <h1>
-      Google Spreadsheet 
-      APIをつかって、スプレッドシートからデータを読み込むサンプル
+      2024年度 麗陵祭 混雑状況マップ
     </h1>
 
     <button>認証する</button>
@@ -47,9 +46,11 @@
 
     <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
     <script>
-
+      const INIT_LOCATION = [35.833800, 139.955000];
+      const INIT_MAP_LEVEL = 17;        
+      
       // Initialize the map and set its view
-      var map = L.map('map').setView([35.83439762845149, 139.95610699230215], 16);
+      var map = L.map('map').setView(INIT_LOCATION, INIT_MAP_LEVEL);
 
       // Add a free OpenStreetMap layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -86,14 +87,28 @@
 
       const fetchAndRender = async ()=>{
         // スプレッドシートの最初のシートの名前を取得
+        // const sheetName = await fetch(
+        //   `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties.title`,
+        //   {
+        //     headers: {
+        //       Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+        //     },
+        //   }
+        // ).then((res) => res.json()).then((data) => data.sheets[0].properties.title);
+
+        const API_KEY = 'AIzaSyDJgVMVcdJVox3QfmxtvX62dlakn5gCHMo';
         const sheetName = await fetch(
-          `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties.title`,
-          {
-            headers: {
-              Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-            },
-          }
-        ).then((res) => res.json()).then((data) => data.sheets[0].properties.title);
+          `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?fields=sheets.properties.title&key=${API_KEY}`
+        ).then(res => res.json())
+          .then(data => {
+            if (data.error) {
+              throw new Error(data.error.message);
+            }
+            return data.sheets[0].properties.title;
+          })
+          .catch(error => {
+            console.error('Failed to fetch sheet name:', error);
+          });        
         console.log('sheetName: ' + sheetName);
 
         // Query google sheet data
@@ -101,12 +116,13 @@
         let values;
         try {
           values = await fetch(
-            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}`,
-            {
-              headers: {
-                Authorization: `Bearer ${localStorage.getItem("access_token")}`,
-              },
-            }
+            // `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}`,
+            // {
+            //   headers: {
+            //     Authorization: `Bearer ${localStorage.getItem("access_token")}`,
+            //   },
+            // }
+            `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${range}?key=${API_KEY}`
           ).then((res) => res.json()).then((data) => data.values);
           console.log('Data loaded successfully. total', values.length, 'lines loaded.');
           console.log('value:', values);
@@ -139,16 +155,17 @@
                   html: `<span style="background-color: ${color}; width: 20px; height: 20px; display: flex; border-radius: 50%; align-items: center; justify-content: center;">12</span>`
               })
           }).addTo(map);
+
+
           const popupContent = `
               <div>
                   <b>${event.title}</b>
-                  <br>Density: ${densityLevel}
-                  <br>Wait time: 5m
-                  <br><a href="https://www.reitaku-u.ac.jp/" target="_blank">More info</a>
+                  <br>人流密度: ${densityLevel}
+                  <br>待ち時間: 5m
+                  ${event.url ? `<br><a href="${event.url}" target="_blank">More info</a>` : ''}
               </div>
           `;
           const popup = L.popup().setContent(popupContent);                    
-          //marker.bindPopup(`${event.title}<br>Density: ${densityLevel}<br>Wait time: 5m`);
           marker.bindPopup(popup);
         });    
         
@@ -223,7 +240,7 @@
 
         function renderListEvent(events, latestEntry) {
             const listContainer = document.getElementById('list_event');
-            listContainer.innerHTML = '';  // 清空现有的列表内容
+            listContainer.innerHTML = '';  // Empty current list
 
             events.forEach(event => {
                 const listItem = document.createElement('li');
@@ -244,15 +261,15 @@
                         <strong>${event.title}</strong> - Density level: ${densityLevel}, Wait time: ${waitTime}分
                     </div>
                     <div>
-                        <p>场所：${event.location || 'Unknown'}</p>
-                        <p>开放时间：${event.opening_hours || 'Unknown'}</p>
+                        <p>場所：${event.location || 'Unknown'}</p>
+                        <p>営業時間：${event.opening_hours || 'Unknown'}</p>
                         <p>${event.description}</p>
                     </div>
                 `;
                 listContainer.appendChild(listItem);
             });
 
-            //document.getElementById('list_event').style.display = 'block';  // 确保列表是可见的
+            //document.getElementById('list_event').style.display = 'block';  //Ensure list is visible
         }
       }
 
@@ -269,12 +286,15 @@
       };
 
       const authenticate = () => {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: CLIENT_ID,
-          callback: handleCredentialResponse,
-          scope: SCOPES,
-        });
-        client.requestAccessToken();
+        // const client = window.google.accounts.oauth2.initTokenClient({
+        //   client_id: CLIENT_ID,
+        //   callback: handleCredentialResponse,
+        //   scope: SCOPES,
+        // });
+        // client.requestAccessToken();
+
+        map.setView(INIT_LOCATION, INIT_MAP_LEVEL);
+        loop();
       };
 
       document.querySelector("button").addEventListener("click", authenticate);
